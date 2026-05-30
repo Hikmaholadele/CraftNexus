@@ -734,7 +734,7 @@ impl OnboardingContract {
             .set(&DataKey::Username(normalized.clone()), &user);
         Self::extend_persistent(&env, &DataKey::Username(normalized.clone()));
 
-        // Emit UserOnboarded event.
+        // Emit UserOnboarded event (#108).
         //
         // Event topic  : `("UserOnboarded",)`
         // Event payload: `UserOnboardedEvent { user, username, role }`
@@ -743,9 +743,29 @@ impl OnboardingContract {
         // * `user`     - The wallet address that was just onboarded.
         // * `username` - The normalized (lowercased, trimmed) username stored on-chain.
         // * `role`     - The role assigned: `Buyer` (1) or `Artisan` (2).
+        //                Numeric discriminants:
+        //                  0 = Admin    (reserved; cannot be self-assigned)
+        //                  1 = Buyer
+        //                  2 = Artisan
+        //                Off-chain consumers should treat any unrecognised discriminant
+        //                as unknown and not silently drop the event.
         //
-        // Off-chain indexers should subscribe to this event to build user registries
-        // and trigger downstream workflows (e.g. welcome emails, dashboard provisioning).
+        // Emitted after all storage writes complete, so subscribers observing this
+        // event can safely query `get_user` and `get_user_by_username` immediately.
+        //
+        // Integration notes for off-chain indexers (#108):
+        //   - Subscribe to topic `"UserOnboarded"` to build a real-time user registry
+        //     without polling `get_user` for every address.
+        //   - The `username` field carries the canonical on-chain form; use it verbatim
+        //     for reverse lookups and display.  Do not re-normalise on the client side
+        //     unless you are constructing a new lookup key (same normalisation rules
+        //     apply: lowercase, separators collapsed to `_`, no leading/trailing `_`).
+        //   - Trigger downstream workflows (welcome emails, dashboard provisioning, etc.)
+        //     only after the event is confirmed in a closed ledger to avoid acting on
+        //     failed transactions.
+        //   - This event is emitted exactly once per address.  A second call to
+        //     `onboard_user` with the same address panics with `AlreadyOnboarded`
+        //     and produces no event.
         env.events().publish(
             (Symbol::new(&env, "UserOnboarded"),),
             UserOnboardedEvent {
