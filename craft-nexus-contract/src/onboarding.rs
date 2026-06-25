@@ -837,19 +837,17 @@ impl OnboardingContract {
     /// This prevents reentrancy where malicious callers trigger intermediate states
     /// via callbacks on arbitrary token contracts before final balance settlement.
     fn parse_verification_action(env: &Env, action: &Symbol) -> VerificationActionCode {
-        if action == &String::from_str(env, "requested") {
+        if action == &Symbol::new(env, "requested") {
             VerificationActionCode::Requested
-        } else if action == &String::from_str(env, "approved") {
+        } else if action == &Symbol::new(env, "approved") {
             VerificationActionCode::Approved
-        } else if action == &String::from_str(env, "rejected") {
+        } else if action == &Symbol::new(env, "rejected") {
             VerificationActionCode::Rejected
-        } else if action == &String::from_str(env, "auto_verified") {
+        } else if action == &Symbol::new(env, "auto_verified") {
             VerificationActionCode::AutoVerified
         } else {
             VerificationActionCode::UsernameChangedRevoked
         }
-
-        action.clone()
     }
 
     fn migrate_legacy_verification_history(env: &Env, user: &Address) {
@@ -2647,6 +2645,13 @@ impl OnboardingContract {
             .get(&DataKey::Config)
             .unwrap_or_else(|| env.panic_with_error(Error::NotInitialized));
         Self::extend_persistent(&env, &DataKey::Config);
+        // [SECURITY] Endpoint #53 (issue #454): this verification state transition
+        // flips `is_verified` on a user profile and is restricted to the platform
+        // admin role. The config is loaded read-only first, then authorization is
+        // enforced via `require_auth()` before any storage write or TTL extension.
+        // The Soroban host aborts the invocation and rolls back the transaction if
+        // the call is not signed by `platform_admin`, so an unauthorized caller can
+        // never reach the profile mutation, queue update, or event emission below.
         config.platform_admin.require_auth();
 
         let profile_key = DataKey::UserProfile(user.clone());
