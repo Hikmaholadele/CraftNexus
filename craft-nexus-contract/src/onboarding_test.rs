@@ -1,5 +1,4 @@
 use super::*;
-use crate::Error;
 use soroban_sdk::{testutils::Address as _, token, Address, Env, String};
 
 fn setup_test(env: &Env) -> (OnboardingContractClient<'static>, Address) {
@@ -1582,10 +1581,11 @@ fn test_update_active_contracts_tracks_state() {
     client.set_escrow_contract(&escrow_id);
 
     client.update_active_contracts(&user, &1);
-    assert!(client.has_active_contracts(&user));
 
     let auths = env.auths();
     assert!(auths.iter().any(|(addr, _)| addr == &escrow_id));
+
+    assert!(client.has_active_contracts(&user));
 
     client.update_active_contracts(&user, &-1);
     assert!(!client.has_active_contracts(&user));
@@ -1708,19 +1708,6 @@ fn test_is_verification_pending_unauthorized() {
     client.is_verification_pending(&user);
 }
 
-#[test]
-#[should_panic]
-fn test_bump_user_profile_ttl_unauthorized() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (client, _admin) = setup_test(&env);
-    let user = Address::generate(&env);
-
-    env.set_auths(&[]);
-    client.bump_user_profile_ttl(&user);
-}
-
 // ── Issue #470: [SECURITY] Endpoint #69 – set_moderator ─────────────────────
 
 /// Issue #470 — set_moderator must record the admin auth signal on success.
@@ -1828,4 +1815,128 @@ fn test_get_verification_queue_returns_pending_users() {
     let auths = env.auths();
     let admin_auth = auths.iter().find(|(addr, _)| addr == &admin);
     assert!(admin_auth.is_some(), "admin auth must be recorded for get_verification_queue");
+}
+
+// ── Issue #430: [SECURITY] Endpoint #29 – get_user_metrics ───────────────────
+
+/// Issue #430 — get_user_metrics must reject callers without user authorization.
+#[test]
+#[should_panic]
+fn test_get_user_metrics_unauthorized() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, OnboardingContract);
+    let client = OnboardingContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let config = OnboardingConfig {
+        require_username: true,
+        min_username_length: 3,
+        max_username_length: 50,
+        platform_admin: admin.clone(),
+        auto_verify_enabled: true,
+        min_escrow_count_for_verify: 5,
+        min_volume_for_verify: 10_000_000_000,
+        escrow_contract: None,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Config, &config);
+    });
+
+    client.get_user_metrics(&user);
+}
+
+// ── Issue #446: [SECURITY] Endpoint #45 – get_user_reputation ──────────────────
+
+/// Issue #446 — get_user_reputation must reject callers without user authorization.
+#[test]
+#[should_panic]
+fn test_get_user_reputation_unauthorized() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, OnboardingContract);
+    let client = OnboardingContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let config = OnboardingConfig {
+        require_username: true,
+        min_username_length: 3,
+        max_username_length: 50,
+        platform_admin: admin.clone(),
+        auto_verify_enabled: true,
+        min_escrow_count_for_verify: 5,
+        min_volume_for_verify: 10_000_000_000,
+        escrow_contract: None,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Config, &config);
+    });
+
+    client.get_user_reputation(&user);
+}
+
+// ── Issue #452: [FEATURE] Business flow #51 – active contract count ────────
+
+/// Issue #452 — get_active_contract_count tracks update_active_contracts deltas.
+#[test]
+fn test_get_active_contract_count_tracks_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin) = setup_test(&env);
+    let user = Address::generate(&env);
+    client.onboard_user(&user, &String::from_str(&env, "counter"), &UserRole::Buyer);
+
+    assert_eq!(client.get_active_contract_count(&user), 0);
+
+    let escrow_id = env.register_contract(None, crate::CraftNexusContract);
+    let platform_wallet = Address::generate(&env);
+    let arbitrator = Address::generate(&env);
+    let escrow_client = crate::CraftNexusContractClient::new(&env, &escrow_id);
+    escrow_client.initialize(
+        &platform_wallet,
+        &admin,
+        &arbitrator,
+        &500,
+        &Some(client.address.clone()),
+    );
+    client.set_escrow_contract(&escrow_id);
+
+    client.update_active_contracts(&user, &2);
+    assert_eq!(client.get_active_contract_count(&user), 2);
+    assert!(client.has_active_contracts(&user));
+
+    client.update_active_contracts(&user, &-2);
+    assert_eq!(client.get_active_contract_count(&user), 0);
+    assert!(!client.has_active_contracts(&user));
+}
+
+/// Issue #452 — has_active_contracts must reject callers without user authorization.
+#[test]
+#[should_panic]
+fn test_has_active_contracts_unauthorized() {
+    let env = Env::default();
+
+    let contract_id = env.register_contract(None, OnboardingContract);
+    let client = OnboardingContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let config = OnboardingConfig {
+        require_username: true,
+        min_username_length: 3,
+        max_username_length: 50,
+        platform_admin: admin.clone(),
+        auto_verify_enabled: true,
+        min_escrow_count_for_verify: 5,
+        min_volume_for_verify: 10_000_000_000,
+        escrow_contract: None,
+    };
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(&DataKey::Config, &config);
+    });
+
+    client.has_active_contracts(&user);
 }

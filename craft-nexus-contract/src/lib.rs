@@ -1,13 +1,8 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
-#![allow(unexpected_cfgs)]
-// use soroban_sdk::{
-//     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
-//     BytesN, Env, IntoVal, Map, String, Symbol, TryFromVal, Val, Vec,
-// };
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String, Symbol,
-    TryFromVal, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
+    BytesN, Env, IntoVal, Map, String, Symbol, TryFromVal, Val, Vec,
 };
 
 #[cfg(test)]
@@ -38,7 +33,7 @@ pub enum Error {
     EscrowNotFound = 2,
     /// Invalid escrow state for operation
     InvalidEscrowState = 3,
-    /// DEPRECATED: Handled by onboarding contract. Retained for ABI compatibility.
+    /// Username already exists
     UsernameAlreadyExists = 4,
     /// Token not whitelisted
     TokenNotWhitelisted = 5,
@@ -48,7 +43,7 @@ pub enum Error {
     ReleaseWindowTooLong = 7,
     /// Not in dispute state
     NotInDispute = 8,
-    /// DEPRECATED: Handled by onboarding contract. Retained for ABI compatibility.
+    /// User already onboarded
     AlreadyOnboarded = 9,
     /// Invalid fee amount (must be <= MAX_PLATFORM_FEE_BPS)
     InvalidFee = 10,
@@ -270,7 +265,8 @@ pub enum DataKey {
     GlobalEscrowIdIndexed(u32),
     /// Fallback admin address for recovery if primary admin storage is corrupted (#240)
     FallbackAdmin,
-    /// Timestamp when admin recovery mechanism becomes available (time-lock safety)
+    /// Timestamp when admin recovery mechanism becomes available (time-lock safety).
+    /// Stored as a compact `u64` ledger timestamp (#431 / key index #30).
     AdminRecoveryTime,
     /// Historical record of stake changes per artisan (bounded queue for audit trail) (#237)
     StakeHistory(Address),
@@ -395,7 +391,7 @@ pub struct Escrow {
     pub created_at: u32,
     pub ipfs_hash: Option<String>,
     pub metadata_hash: Option<Bytes>,
-    pub dispute_reason: Option<Symbol>,
+    pub dispute_reason: Option<String>,
     pub dispute_initiated_at: Option<u64>,
     pub funded: bool,
 }
@@ -884,6 +880,8 @@ pub trait OnboardingInterface {
     fn verify_user(env: Env, user: Address) -> UserProfile;
     /// Return true if the user currently has any active escrow obligations.
     fn has_active_contracts(env: Env, user: Address) -> bool;
+    /// Return the locally-tracked count of active contracts for a user (#452 / feature #51).
+    fn get_active_contract_count(env: Env, user: Address) -> u32;
     /// Update onboarding's local active-contract counter for a user.
     ///
     /// `delta` should be `+1` when an escrow becomes active and `-1` when the
@@ -1268,7 +1266,16 @@ impl CraftNexusContract {
         );
     }
 
-   
+    fn enter_reentry_guard(env: &Env) {
+        if env.storage().temporary().has(&DataKey::ReentryGuard) {
+            env.panic_with_error(crate::Error::ReentryDetected);
+        }
+        env.storage().temporary().set(&DataKey::ReentryGuard, &true);
+    }
+
+    fn exit_reentry_guard(env: &Env) {
+        env.storage().temporary().remove(&DataKey::ReentryGuard);
+    }
 
     /// Atomically appends one escrow ID to the indexed global registry and
     /// increments `EscrowCount` (#515 / Issue #226).
@@ -1443,6 +1450,20 @@ impl CraftNexusContract {
                 value
             }
             None => 0u32,
+        }
+    }
+
+    /// Read a persistent `u64` and extend its TTL when the key exists (#431 / key index #30).
+    ///
+    /// [`DataKey::AdminRecoveryTime`] stores a compact `u64` timestamp rather than
+    /// a nested struct to minimize persistent rent for the admin-recovery time lock.
+    fn get_persistent_u64(env: &Env, key: &DataKey) -> u64 {
+        match env.storage().persistent().get(key) {
+            Some(value) => {
+                Self::extend_persistent(env, key);
+                value
+            }
+            None => 0u64,
         }
     }
 
@@ -2270,19 +2291,16 @@ impl CraftNexusContract {
         // Validate the recovery address
         Self::validate_admin_address(&env, &recovered_admin)?;
 
-        // Check if recovery time lock has passed
-        let recovery_time_key = DataKey::AdminRecoveryTime;
-        let recovery_time: u64 = env
-            .storage()
-            .persistent()
-            .get(&recovery_time_key)
-            .unwrap_or(0);
+        // Check if recovery time lock has passed (#431 — TTL-friendly read)
+        let recovery_time =
+            Self::get_persistent_u64(&env, &DataKey::AdminRecoveryTime);
 
         let current_time = env.ledger().timestamp();
 
         // If this is the first recovery request, initiate time lock
         if recovery_time == 0 {
             let new_recovery_time = current_time + ADMIN_RECOVERY_DELAY;
+            let recovery_time_key = DataKey::AdminRecoveryTime;
             env.storage()
                 .persistent()
                 .set(&recovery_time_key, &new_recovery_time);
@@ -2314,7 +2332,9 @@ impl CraftNexusContract {
         Self::extend_persistent(&env, &ADMIN);
 
         // Clear the recovery time lock for next cycle
-        env.storage().persistent().remove(&recovery_time_key);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::AdminRecoveryTime);
 
         // Emit audit event
         Self::emit_admin_changed(&env, previous_admin, recovered_admin, "admin_recovered");
@@ -2853,7 +2873,7 @@ impl CraftNexusContract {
     }
 
     fn try_get_escrow_readonly(env: &Env, order_id: u32) -> Escrow {
-            let key = (ESCROW, order_id);
+        let key = (ESCROW, order_id);
         let stored: Val = env
             .storage()
             .persistent()
@@ -2869,31 +2889,19 @@ impl CraftNexusContract {
                 if escrow.version < CURRENT_ESCROW_VERSION {
                     escrow.version = CURRENT_ESCROW_VERSION;
                 }
-                Self::extend_persistent(env, &key); // OPTIMIZED: Ensure TTL extension on read
                 return escrow;
             }
 
             let previous = EscrowWithoutBatch::try_from_val(env, &stored).expect("");
-            let mut escrow = Self::escrow_from_without_batch(env, previous);
+            let mut escrow = Self::escrow_from_without_batch(previous);
             if escrow.version < CURRENT_ESCROW_VERSION {
                 escrow.version = CURRENT_ESCROW_VERSION;
             }
-            Self::extend_persistent(env, &key); // OPTIMIZED: Ensure TTL extension on read
             return escrow;
         }
 
         let legacy = LegacyEscrow::try_from_val(env, &stored).expect("");
-        
-        let dispute_symbol = legacy.dispute_reason.map(|r| {
-            // Safety bound: Symbols max at 32 chars. Truncate if legacy reason is too long.
-            let len = r.len() as usize;
-            let slice_len = core::cmp::min(len, 32);
-            let mut buf = [0u8; 32];
-            r.copy_into_slice(&mut buf[..slice_len]);
-            Symbol::from_bytes(env, &buf[..slice_len])
-        });
-
-        let upgraded = Escrow {
+        Escrow {
             version: CURRENT_ESCROW_VERSION,
             id: legacy.id,
             batch_id: None,
@@ -2906,14 +2914,11 @@ impl CraftNexusContract {
             created_at: legacy.created_at,
             ipfs_hash: legacy.ipfs_hash,
             metadata_hash: legacy.metadata_hash,
-            dispute_reason: dispute_symbol, // Map to lightweight Symbol
+            dispute_reason: legacy.dispute_reason,
             dispute_initiated_at: legacy.dispute_initiated_at,
             funded: true,
-        };
-        Self::extend_persistent(env, &key); // OPTIMIZED: Ensure TTL extension on read
-        upgraded
+        }
     }
-
 
     fn get_stored_escrow(env: &Env, order_id: u32) -> Escrow {
         let key = (ESCROW, order_id);
@@ -2974,15 +2979,7 @@ impl CraftNexusContract {
         escrow
     }
 
-    fn escrow_from_without_batch(env: &Env, escrow: EscrowWithoutBatch) -> Escrow {
-        let dispute_symbol = escrow.dispute_reason.map(|r| {
-            let len = r.len() as usize;
-            let slice_len = core::cmp::min(len, 32);
-            let mut buf = [0u8; 32];
-            r.copy_into_slice(&mut buf[..slice_len]);
-            Symbol::from_bytes(env, &buf[..slice_len])
-        });
-
+    fn escrow_from_without_batch(escrow: EscrowWithoutBatch) -> Escrow {
         Escrow {
             version: escrow.version,
             id: escrow.id,
@@ -2996,7 +2993,7 @@ impl CraftNexusContract {
             created_at: escrow.created_at,
             ipfs_hash: escrow.ipfs_hash,
             metadata_hash: escrow.metadata_hash,
-            dispute_reason: dispute_symbol, // Map to lightweight Symbol
+            dispute_reason: escrow.dispute_reason,
             dispute_initiated_at: escrow.dispute_initiated_at,
             funded: true,
         }
@@ -3982,10 +3979,10 @@ impl CraftNexusContract {
     /// * `order_id` - Order identifier
     /// * `dispute_reason` - Reason for dispute
     /// * `authorized_address` - Address authorized to dispute (buyer or seller)
-   pub fn dispute_escrow(
+    pub fn dispute_escrow(
         env: Env,
         order_id: u32,
-        dispute_reason: Symbol, // UPDATE ARGUMENT TYPE
+        dispute_reason: String,
         authorized_address: Address,
     ) {
         authorized_address.require_auth();
@@ -4002,7 +3999,7 @@ impl CraftNexusContract {
         }
 
         escrow.status = EscrowStatus::Disputed;
-        escrow.dispute_reason = Some(dispute_reason); // Assign Symbol
+        escrow.dispute_reason = Some(dispute_reason.clone());
         escrow.dispute_initiated_at = Some(env.ledger().timestamp());
         env.storage().persistent().set(&(ESCROW, order_id), &escrow);
 
@@ -4019,7 +4016,7 @@ impl CraftNexusContract {
             },
         );
     }
-    
+
     /// Resolve disputed escrow (arbitrator only).
     ///
     /// This function transitions the escrow from `Disputed` to `Resolved`.
@@ -5987,16 +5984,4 @@ impl CraftNexusContract {
 
         Ok(unallocated)
     }
-
-    fn enter_reentry_guard(env: &Env) {
-        if env.storage().temporary().has(&DataKey::ReentryGuard) {
-            env.panic_with_error(crate::Error::ReentryDetected);
-        }
-        env.storage().temporary().set(&DataKey::ReentryGuard, &true);
-    }
-
-    fn exit_reentry_guard(env: &Env) {
-        env.storage().temporary().remove(&DataKey::ReentryGuard);
-    }
-
 }
