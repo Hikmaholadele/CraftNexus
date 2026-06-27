@@ -1,13 +1,10 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 #![allow(unexpected_cfgs)]
-// use soroban_sdk::{
-//     contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
-//     BytesN, Env, IntoVal, Map, String, Symbol, TryFromVal, Val, Vec,
-// };
+extern crate alloc;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes, BytesN, Env, IntoVal, Map, String, Symbol,
-    TryFromVal, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Bytes,
+    BytesN, Env, IntoVal, Map, String, Symbol, TryFromVal, Val, Vec,
 };
 
 #[cfg(test)]
@@ -3045,8 +3042,8 @@ impl CraftNexusContract {
             let slice_len = core::cmp::min(len, 32);
             let mut buf = [0u8; 32];
             r.copy_into_slice(&mut buf[..slice_len]);
-            let rust_str = core::str::from_utf8(&buf[..slice_len]).unwrap();
-            Symbol::new(env, rust_str)
+            let s = core::str::from_utf8(&buf[..slice_len]).unwrap();
+            Symbol::new(env, s)
         });
 
         let upgraded = Escrow {
@@ -3062,7 +3059,7 @@ impl CraftNexusContract {
             created_at: legacy.created_at,
             ipfs_hash: legacy.ipfs_hash,
             metadata_hash: legacy.metadata_hash,
-            dispute_reason: dispute_symbol, // Map to lightweight Symbol
+            dispute_reason: dispute_symbol,
             dispute_initiated_at: legacy.dispute_initiated_at,
             funded: true,
         };
@@ -3102,8 +3099,8 @@ impl CraftNexusContract {
             let slice_len = core::cmp::min(len, 32);
             let mut buf = [0u8; 32];
             r.copy_into_slice(&mut buf[..slice_len]);
-            let rust_str = core::str::from_utf8(&buf[..slice_len]).unwrap();
-            Symbol::new(env, rust_str)
+            let s = core::str::from_utf8(&buf[..slice_len]).unwrap();
+            Symbol::new(env, s)
         });
         let upgraded = Escrow {
             version: CURRENT_ESCROW_VERSION,
@@ -3144,8 +3141,8 @@ impl CraftNexusContract {
             let slice_len = core::cmp::min(len, 32);
             let mut buf = [0u8; 32];
             r.copy_into_slice(&mut buf[..slice_len]);
-            let rust_str = core::str::from_utf8(&buf[..slice_len]).unwrap();
-            Symbol::new(env, rust_str)
+            let s = core::str::from_utf8(&buf[..slice_len]).unwrap();
+            Symbol::new(env, s)
         });
 
         Escrow {

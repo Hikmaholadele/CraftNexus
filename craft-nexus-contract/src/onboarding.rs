@@ -6,9 +6,10 @@
 #![allow(unexpected_cfgs)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String, Symbol,
-    TryFromVal, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
+    Symbol, TryFromVal, Val, Vec,
 };
+use alloc::string::ToString;
 
 extern crate alloc;
 use alloc::string::ToString;
@@ -1407,8 +1408,8 @@ impl OnboardingContract {
         let username_len = core::cmp::min(normalized.len() as usize, 32);
         let mut user_buf = [0u8; 32];
         normalized.copy_into_slice(&mut user_buf[..username_len]);
-        let rust_str = core::str::from_utf8(&user_buf[..username_len]).unwrap();
-        let optimized_username = Symbol::new(&env, rust_str);
+        let s = core::str::from_utf8(&user_buf[..username_len]).unwrap();
+        let optimized_username = Symbol::new(&env, s);
         assert!(
             username_len >= config.min_username_length as usize,
             "Username too short"
@@ -1467,7 +1468,7 @@ impl OnboardingContract {
             version: CURRENT_USER_PROFILE_VERSION,
             address: user.clone(),
             role,
-            username: optimized_username,           
+            username: optimized_username,
             registered_at: env.ledger().timestamp(),
             is_verified: false,
             successful_trades: 0,
