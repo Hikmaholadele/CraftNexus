@@ -3,12 +3,14 @@
 //! Handles user registration (onboarding), role assignments, username configuration,
 //! profile management, and verification processes for buyers and artisans on the CraftNexus platform.
 
-
+#![allow(unexpected_cfgs)]
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
     Symbol, TryFromVal, Val, Vec,
 };
+use alloc::string::ToString;
+
 extern crate alloc;
 
 /// Standard TTL threshold for persistent storage (approx 14 hours at 5s ledger)
@@ -1787,8 +1789,6 @@ impl OnboardingContract {
     /// # Errors
     /// None — always returns a `bool`.
     pub fn is_onboarded(env: Env, user: Address) -> bool {
-        // [SECURITY] Endpoint #37: Only the user themselves may check onboarding status.
-        // This prevents unauthorized enumeration of onboarded accounts.
         user.require_auth();
         let key = DataKey::UserProfile(user.clone());
         if env.storage().persistent().has(&key) {
@@ -2230,8 +2230,6 @@ impl OnboardingContract {
     /// # Errors
     /// None.
     pub fn is_verified(env: Env, user: Address) -> bool {
-        // [SECURITY] Endpoint #49: Only authorized users may check verification status.
-        // This prevents unauthorized actors from enumerating verified accounts.
         user.require_auth();
         let profile_key = DataKey::UserProfile(user.clone());
         if let Some(profile) = env
