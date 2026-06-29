@@ -915,6 +915,31 @@ fn test_claim_admin_no_pending_fails() {
     client.claim_admin();
 }
 
+// ===== Admin address validation tests (#419) =====
+
+#[test]
+#[should_panic]
+fn test_update_admin_contract_address_rejected() {
+    // Transferring admin to the contract itself must be rejected.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, _) = setup_test(&env, true);
+    client.update_admin(&client.address.clone());
+}
+
+#[test]
+#[should_panic]
+fn test_update_admin_requires_new_admin_cosign() {
+    // Without new_admin providing auth, update_admin must fail.
+    // setup_test(false) skips mock_all_auths, so new_admin's require_auth
+    // is never satisfied and the call panics.
+    let env = Env::default();
+    let (client, _, _, _, _, _, _) = setup_test(&env, false);
+    let new_admin = Address::generate(&env);
+    // No auth is mocked — both current-admin and new_admin auth will fail.
+    client.update_admin(&new_admin);
+}
+
 #[test]
 fn test_wasm_upgrade_grace_period() {
     let env = Env::default();

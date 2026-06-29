@@ -2298,15 +2298,21 @@ impl CraftNexusContract {
 
     /// Propose a new administrator for the platform (admin only).
     /// Starts the two-step transfer process (#95).
-    /// Enhanced with validation and audit logging (#240)
+    /// Both the current admin and the incoming admin must co-sign, proving the
+    /// new address is a live, registered ledger node capable of authorizing
+    /// transactions (#419).
     pub fn update_admin(env: Env, new_admin: Address) {
         let mut config = Self::get_platform_config_internal(&env);
         config.admin.require_auth();
 
-        // Validate the new admin address to prevent configuration errors (#240)
+        // Validate: not the contract address itself (#240)
         if let Err(_) = Self::validate_admin_address(&env, &new_admin) {
             env.panic_with_error(Error::InvalidAdminAddress);
         }
+
+        // Require the incoming admin to co-sign, proving it is a fully
+        // registered ledger node that controls its own private key (#419).
+        new_admin.require_auth();
 
         let previous_admin = config.admin.clone();
         config.pending_admin = Some(new_admin.clone());
