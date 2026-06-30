@@ -1951,6 +1951,14 @@ impl CraftNexusContract {
 
         let previous = Self::get_onboarding_address(&env);
 
+        // Issue #527 — short-circuit on the no-op call before paying
+        // for the persistent storage write and TTL extension.
+        if let Some(ref current) = previous {
+            if *current == contract_address {
+                return;
+            }
+        }
+
         env.storage()
             .persistent()
             .set(&DataKey::OnboardingContractAddress, &contract_address);
