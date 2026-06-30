@@ -19,6 +19,8 @@ mod reentrancy_test;
 mod scalability_test;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod event_snapshot_test;
 // Onboarding is a separate logical contract; only one `#[contract]` may be linked per WASM
 // artifact. Keep it in this crate for host tests (`cargo test`) but omit from guest builds.
 #[cfg(not(target_family = "wasm"))]
