@@ -64,7 +64,7 @@ fn setup_test() -> (
         token_addr,
         admin,
         platform_wallet,
-        arbitrator,
+        arbitrator.clone(),
         onboarding_contract,
     )
 }
