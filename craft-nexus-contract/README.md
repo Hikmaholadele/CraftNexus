@@ -898,6 +898,8 @@ for (const evt of ledgerEvents) {
 
 ## Security Considerations
 
+- Admin recovery: A minimum 7-day time-lock is enforced for admin recovery flows. The contract records the cooldown used when initiating recovery and rejects attempts if the recorded delay is missing or below the 7-day floor to prevent direct-storage bypasses.
+
 1. **Admin and Arbitrator Key Management**: `admin` and `arbitrator` can change critical state. Store these keys in HSM or custody infrastructure.
 2. **Strict Auth Expectations**: `buyer.require_auth()`, `admin.require_auth()`, and arbitrator authorization gates are core safety controls. Never bypass these in wrappers.
 3. **Minimum Amount Policy**: Configure `DataKey::MinEscrowAmount(token)` for each accepted token to avoid dust escrow spam.

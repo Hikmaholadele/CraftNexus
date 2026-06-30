@@ -182,6 +182,9 @@ const MAX_STAKE_QUEUE_SIZE: u32 = 50;
 const STAKE_QUEUE_PRUNE_THRESHOLD: u32 = 40;
 /// Time lock period before admin recovery is allowed (7 days) (#240)
 const ADMIN_RECOVERY_DELAY: u64 = 7 * 24 * 60 * 60;
+/// Minimum allowed admin recovery cooldown. Deploys attempting to set a
+/// shorter window (including zero) will be rejected during recovery.
+const MIN_ADMIN_RECOVERY_COOLDOWN: u64 = 7 * 24 * 60 * 60;
 
 #[contracttype]
 #[derive(Clone, Eq, PartialEq)]
@@ -272,6 +275,9 @@ pub enum DataKey {
     /// Timestamp when admin recovery mechanism becomes available (time-lock safety).
     /// Stored as a compact `u64` ledger timestamp (#431 / key index #30).
     AdminRecoveryTime,
+    /// The configured delay (seconds) that was recorded when the recovery time
+    /// was initiated. Used to validate that a minimum cooldown was respected.
+    AdminRecoveryDelay,
     /// Historical record of stake changes per artisan (bounded queue for audit trail) (#237)
     StakeHistory(Address),
     /// Count of entries in the stake history queue (bounds checking)
@@ -2460,7 +2466,9 @@ impl CraftNexusContract {
 
         let current_time = env.ledger().timestamp();
 
-        // If this is the first recovery request, initiate time lock
+        // If this is the first recovery request, initiate time lock and record
+        // the delay used so that malicious direct writes to `AdminRecoveryTime`
+        // cannot bypass the minimum cooldown requirement.
         if recovery_time == 0 {
             let new_recovery_time = current_time + ADMIN_RECOVERY_DELAY;
             let recovery_time_key = DataKey::AdminRecoveryTime;
@@ -2468,6 +2476,14 @@ impl CraftNexusContract {
                 .persistent()
                 .set(&recovery_time_key, &new_recovery_time);
             Self::extend_persistent(&env, &recovery_time_key);
+
+            // Record the delay used for this initiation so it can be validated
+            // later when recovery is attempted.
+            let delay_key = DataKey::AdminRecoveryDelay;
+            env.storage()
+                .persistent()
+                .set(&delay_key, &ADMIN_RECOVERY_DELAY);
+            Self::extend_persistent(&env, &delay_key);
 
             env.events().publish(
                 (Symbol::new(&env, "admin_recovery_initiated"), true),
@@ -2478,6 +2494,14 @@ impl CraftNexusContract {
 
         // Check if time lock period has elapsed
         if current_time < recovery_time {
+            return Err(Error::AdminRecoveryFailed);
+        }
+
+        // Ensure the recorded cooldown meets the minimum floor. If the delay
+        // is missing or below the minimum, treat this as a failed recovery
+        // attempt to prevent direct-storage bypasses.
+        let recorded_delay = Self::get_persistent_u64(&env, &DataKey::AdminRecoveryDelay);
+        if recorded_delay == 0 || recorded_delay < MIN_ADMIN_RECOVERY_COOLDOWN {
             return Err(Error::AdminRecoveryFailed);
         }
 
@@ -2499,6 +2523,10 @@ impl CraftNexusContract {
         env.storage()
             .persistent()
             .remove(&DataKey::AdminRecoveryTime);
+        // Clear the recorded delay as well
+        env.storage()
+            .persistent()
+            .remove(&DataKey::AdminRecoveryDelay);
 
         // Emit audit event
         Self::emit_admin_changed(&env, previous_admin, recovered_admin, "admin_recovered");
