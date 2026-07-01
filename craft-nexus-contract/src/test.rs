@@ -100,11 +100,11 @@ fn test_create_escrow_success() {
     // Verify event
     let events = env.events().all();
     assert!(!events.is_empty(), "No events emitted");
-    let last_event = events.last().unwrap();
-    assert_eq!(last_event.0, client.address);
+    let last_event = events.last();
+    assert_eq!(last_event.as_ref().unwrap().0, client.address);
     // Topics: ["escrow_created", escrow_id]
     assert_eq!(
-        last_event.1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -113,7 +113,7 @@ fn test_create_escrow_success() {
     );
 
     // Verify payload
-    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, order_id as u64);
     assert_eq!(event.action, EscrowAction::Created);
     assert_eq!(event.buyer, buyer);
@@ -265,7 +265,7 @@ fn test_dispute_escrow_success() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -274,7 +274,7 @@ fn test_dispute_escrow_success() {
     );
 
     // Verify payload
-    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, 1);
     assert_eq!(event.action, EscrowAction::Disputed);
     assert_eq!(event.buyer, buyer);
@@ -403,6 +403,31 @@ fn test_resolve_dispute_by_moderator() {
 
     let escrow = client.get_escrow(&1);
     assert_eq!(escrow.status, EscrowStatus::Resolved);
+}
+
+#[test]
+fn test_recover_admin_with_zero_window_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _buyer, _seller, _token_id, _token_admin, _platform_wallet, _admin) =
+        setup_test(&env, true);
+
+    // Simulate a malicious/deployer-provided zero-second recovery window by
+    // writing a recovery time equal to the current ledger timestamp and
+    // recording a zero delay. The contract should reject recovery attempts
+    // that don't meet the minimum cooldown.
+    let current_time = env.ledger().timestamp();
+    env.storage()
+        .persistent()
+        .set(&DataKey::AdminRecoveryTime, &current_time);
+    env.storage()
+        .persistent()
+        .set(&DataKey::AdminRecoveryDelay, &0u64);
+
+    let recovered_admin = Address::generate(&env);
+    let res = client.recover_admin_access(&recovered_admin);
+    assert!(res.is_err());
+    assert_eq!(res.unwrap_err(), Error::AdminRecoveryFailed);
 }
 
 #[test]
@@ -597,8 +622,8 @@ fn test_update_platform_fee() {
     assert_eq!(client.get_platform_fee(), 800);
 
     let events = env.events().all();
-    let last_event = events.last().unwrap();
-    let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let last_event = events.last();
+    let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(
         config_event.field_name,
         Symbol::new(&env, "platform_fee_bps")
@@ -728,7 +753,7 @@ fn test_set_artisan_fee_tier_emits_dedicated_event() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "artisan_fee_tier_updated").into_val(&env),
@@ -736,7 +761,7 @@ fn test_set_artisan_fee_tier_emits_dedicated_event() {
         ]
     );
 
-    let fee_event: ArtisanFeeTierUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let fee_event: ArtisanFeeTierUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(fee_event.artisan, seller);
     assert_eq!(fee_event.fee_bps, 750);
 }
@@ -1414,8 +1439,8 @@ fn test_set_min_escrow_amount_emits_config_event() {
     client.set_min_escrow_amount(&token_id, &1_00000);
 
     let events = env.events().all();
-    let last_event = events.last().unwrap();
-    let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let last_event = events.last();
+    let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
 
     assert_eq!(
         config_event.field_name,
@@ -2024,7 +2049,7 @@ fn test_extend_release_window_success() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -2032,7 +2057,7 @@ fn test_extend_release_window_success() {
         ]
     );
 
-    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, 1);
     assert_eq!(event.action, EscrowAction::Extended);
     assert_eq!(event.buyer, buyer);
@@ -2609,7 +2634,7 @@ fn test_verify_metadata_reveal_authorized_emits_metadata_verified_event() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "metadata_verified").into_val(&env),
@@ -2634,7 +2659,7 @@ fn test_set_paused_emits_platform_status_events() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "platform_paused").into_val(&env),
@@ -2651,7 +2676,7 @@ fn test_set_paused_emits_platform_status_events() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.as_ref().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "platform_unpaused").into_val(&env),
