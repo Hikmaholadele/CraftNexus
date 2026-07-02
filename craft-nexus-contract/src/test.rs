@@ -2201,7 +2201,7 @@ fn test_set_onboarding_contract_same_address_skips_storage_write() {
     let events_after_second = env.events().all().len();
     assert_eq!(events_after_second, events_after_first);
 
-    assert_eq!(client.get_onboarding_contract(), Ok(new_onboarding));
+    assert_eq!(client.get_onboarding_contract(), new_onboarding);
 }
 
 /// When no onboarding contract is set, release_funds completes without error.
