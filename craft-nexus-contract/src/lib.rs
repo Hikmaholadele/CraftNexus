@@ -3105,7 +3105,6 @@ impl CraftNexusContract {
     }
 
     fn get_platform_config_internal(env: &Env) -> PlatformConfig {
-        Self::extend_persistent_read(env, &DataKey::PlatformConfig);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTENSION);
