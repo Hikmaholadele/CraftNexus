@@ -113,7 +113,7 @@ fn test_create_escrow_success() {
     );
 
     // Verify payload
-    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, order_id as u64);
     assert_eq!(event.action, EscrowAction::Created);
     assert_eq!(event.buyer, buyer);
@@ -265,7 +265,7 @@ fn test_dispute_escrow_success() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -274,7 +274,7 @@ fn test_dispute_escrow_success() {
     );
 
     // Verify payload
-    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, 1);
     assert_eq!(event.action, EscrowAction::Disputed);
     assert_eq!(event.buyer, buyer);
@@ -425,9 +425,8 @@ fn test_recover_admin_with_zero_window_fails() {
         .set(&DataKey::AdminRecoveryDelay, &0u64);
 
     let recovered_admin = Address::generate(&env);
-    let res = client.recover_admin_access(&recovered_admin);
-    assert!(res.is_err());
-    assert_eq!(res.unwrap_err(), Error::AdminRecoveryFailed);
+    let res = client.try_recover_admin_access(&recovered_admin);
+    assert!(matches!(res, Err(Ok(Error::AdminRecoveryFailed))));
 }
 
 #[test]
@@ -797,7 +796,7 @@ fn test_set_artisan_fee_tier_emits_dedicated_event() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.1,
         vec![
             &env,
             Symbol::new(&env, "artisan_fee_tier_updated").into_val(&env),
@@ -805,7 +804,7 @@ fn test_set_artisan_fee_tier_emits_dedicated_event() {
         ]
     );
 
-    let fee_event: ArtisanFeeTierUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let fee_event: ArtisanFeeTierUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(fee_event.artisan, seller);
     assert_eq!(fee_event.fee_bps, 750);
 }
@@ -2093,7 +2092,7 @@ fn test_extend_release_window_success() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -2101,7 +2100,7 @@ fn test_extend_release_window_success() {
         ]
     );
 
-    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, 1);
     assert_eq!(event.action, EscrowAction::Extended);
     assert_eq!(event.buyer, buyer);
@@ -2678,7 +2677,7 @@ fn test_verify_metadata_reveal_authorized_emits_metadata_verified_event() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.1,
         vec![
             &env,
             Symbol::new(&env, "metadata_verified").into_val(&env),
@@ -2686,7 +2685,7 @@ fn test_verify_metadata_reveal_authorized_emits_metadata_verified_event() {
         ]
     );
 
-    let event: MetadataVerifiedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let event: MetadataVerifiedEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(event.order_id, 1);
     assert_eq!(event.verifier, buyer);
     assert_eq!(event.timestamp, 1711368000);
@@ -2703,7 +2702,7 @@ fn test_set_paused_emits_platform_status_events() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.1,
         vec![
             &env,
             Symbol::new(&env, "platform_paused").into_val(&env),
@@ -2711,7 +2710,7 @@ fn test_set_paused_emits_platform_status_events() {
         ]
     );
 
-    let paused_event: PlatformPausedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let paused_event: PlatformPausedEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(paused_event.initiator, admin.clone());
     assert_eq!(paused_event.timestamp, 1711368000);
 
@@ -2720,7 +2719,7 @@ fn test_set_paused_emits_platform_status_events() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     assert_eq!(
-        last_event.unwrap().1,
+        last_event.1,
         vec![
             &env,
             Symbol::new(&env, "platform_unpaused").into_val(&env),
@@ -2728,7 +2727,7 @@ fn test_set_paused_emits_platform_status_events() {
         ]
     );
 
-    let unpaused_event: PlatformUnpausedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
+    let unpaused_event: PlatformUnpausedEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(unpaused_event.initiator, admin);
     assert_eq!(unpaused_event.timestamp, 1711368000);
 }
