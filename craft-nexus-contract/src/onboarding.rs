@@ -87,8 +87,6 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
     Symbol, TryFromVal, Val, Vec,
 };
-use crate::alloc::string::ToString;
-extern crate alloc;
 
 /// Standard TTL threshold for persistent storage (approx 14 hours at 5s ledger)
 const TTL_THRESHOLD: u32 = 10_000;
@@ -416,6 +414,8 @@ pub struct OnboardCallFailedEvent {
     pub reason: u32,
     /// Ledger timestamp when the failure occurred
     pub timestamp: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoVerifiedEvent {
@@ -1904,9 +1904,10 @@ impl OnboardingContract {
             .storage()
             .persistent()
             .get(&DataKey::Config)
-            .unwrap_or_else(|| Self::emit_onboard_failed_and_panic(&env, &user, Error::NotInitialized));
+            .unwrap_or_else(|| {
+                Self::emit_onboard_failed_and_panic(&env, &user, Error::NotInitialized)
+            });
         Self::extend_persistent(&env, &DataKey::Config);
-            .unwrap_or_else(|| env.panic_with_error(Error::NotInitialized));
 
         // [SECURITY] Endpoint #93: Only verified platform roles may approve new user
         // registrations. The platform admin must co-sign every onboarding transaction
