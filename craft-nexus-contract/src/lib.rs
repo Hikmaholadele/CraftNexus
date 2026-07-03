@@ -220,6 +220,10 @@ const TTL_EXTENSION: u32 = 518_400;
 // Default configuration constants (can be overridden via PlatformConfig)
 /// Default grace period for WASM upgrades (7 days in seconds)
 const DEFAULT_WASM_UPGRADE_COOLDOWN: u32 = 7 * 24 * 60 * 60;
+/// Minimum time (seconds) that must elapse after a cancel_upgrade_wasm call
+/// before propose_upgrade_wasm is accepted again (Issue #618).
+/// Prevents the cancel-and-repropose pattern that resets the review window.
+const CANCEL_REPROPOSE_COOLDOWN: u64 = 7 * 24 * 60 * 60; // 7 days
 
 /// Default maximum duration a dispute can remain open before it can be force-resolved (30 days in seconds)
 const DEFAULT_MAX_DISPUTE_DURATION: u32 = 30 * 24 * 60 * 60;
@@ -388,6 +392,9 @@ pub enum DataKey {
     UpgradeApprovals(BytesN<32>),
     /// Ordered list of addresses authorized to co-sign WASM upgrade proposals.
     UpgradeSigners,
+    /// Ledger timestamp (u64) recorded when the last upgrade proposal was
+    /// cancelled. Used to enforce CANCEL_REPROPOSE_COOLDOWN (Issue #618).
+    LastUpgradeCancelledAt,
 }
 
 #[contracttype]
@@ -3977,6 +3984,20 @@ impl CraftNexusContract {
 
         Self::validate_upgrade_hash(&env, &new_wasm_hash)?;
 
+        // Issue #618: Prevent cancel-and-repropose from resetting the review
+        // window. If a proposal was recently cancelled, the proposer must wait
+        // CANCEL_REPROPOSE_COOLDOWN seconds before submitting a new one.
+        if let Some(cancelled_at) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&DataKey::LastUpgradeCancelledAt)
+        {
+            let now = env.ledger().timestamp();
+            if now < cancelled_at.saturating_add(CANCEL_REPROPOSE_COOLDOWN) {
+                return Err(Error::UpgradeCooldownActive);
+            }
+        }
+
         if env
             .storage()
             .persistent()
@@ -4187,6 +4208,15 @@ impl CraftNexusContract {
         env.storage()
             .persistent()
             .remove(&DataKey::WasmUpgradeProposal);
+
+        // Issue #618: Record the cancellation timestamp so propose_upgrade_wasm
+        // can enforce CANCEL_REPROPOSE_COOLDOWN against the cancel-and-repropose
+        // bypass pattern.
+        let cancelled_at = env.ledger().timestamp();
+        env.storage()
+            .persistent()
+            .set(&DataKey::LastUpgradeCancelledAt, &cancelled_at);
+        Self::extend_persistent(&env, &DataKey::LastUpgradeCancelledAt);
 
         Self::emit_upgrade_event(
             &env,

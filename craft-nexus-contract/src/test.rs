@@ -1093,6 +1093,53 @@ fn test_cancel_upgrade_wasm() {
     // Should panic when trying to update since proposal is gone
 }
 
+/// Issue #618 — cancel-and-repropose must not reset the review window.
+/// After a cancellation, propose_upgrade_wasm must return UpgradeCooldownActive
+/// if less than CANCEL_REPROPOSE_COOLDOWN seconds have elapsed.
+/// UpgradeCooldownActive = Error discriminant #33.
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #33)")]
+fn test_cancel_then_repropose_blocked_by_cooldown() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    let hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    // Propose and then cancel — this records LastUpgradeCancelledAt
+    client.propose_upgrade_wasm(&admin, &hash);
+    client.cancel_upgrade_wasm();
+
+    // Immediately re-proposing (same ledger timestamp) must panic with
+    // UpgradeCooldownActive (#33)
+    client.propose_upgrade_wasm(&admin, &hash);
+}
+
+/// Issue #618 — after the cancel cooldown window elapses, a new proposal must
+/// be accepted without error.
+#[test]
+fn test_repropose_succeeds_after_cancel_cooldown_elapses() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    let hash = BytesN::from_array(&env, &[2u8; 32]);
+
+    // Propose and cancel
+    client.propose_upgrade_wasm(&admin, &hash);
+    client.cancel_upgrade_wasm();
+
+    // Advance the ledger past CANCEL_REPROPOSE_COOLDOWN (7 days + 1 s)
+    env.ledger().with_mut(|li| {
+        li.timestamp += 7 * 24 * 60 * 60 + 1;
+    });
+
+    // Re-proposing after the cooldown must succeed
+    client.propose_upgrade_wasm(&admin, &hash);
+    let proposal = client.get_upgrade_proposal().expect("proposal should exist");
+    assert_eq!(proposal.wasm_hash, hash);
+}
+
 #[test]
 fn test_fee_rounding_floor_behavior_small_amounts() {
     let env = Env::default();
