@@ -3409,9 +3409,20 @@ impl CraftNexusContract {
         }
     }
 
-    /// Calculate platform fee for a given amount
-    fn calculate_fee(amount: i128, fee_bps: u32) -> i128 {
-        (amount * (fee_bps as i128)) / 10000
+    /// Calculate platform fee for a given amount.
+    fn try_calculate_fee(amount: i128, fee_bps: u32) -> Result<i128, Error> {
+        if amount < 0 {
+            return Err(Error::InvalidFee);
+        }
+
+        amount
+            .checked_mul(fee_bps as i128)
+            .and_then(|product| product.checked_div(10_000))
+            .ok_or(Error::InvalidFee)
+    }
+
+    fn calculate_fee(env: &Env, amount: i128, fee_bps: u32) -> i128 {
+        Self::try_calculate_fee(amount, fee_bps).unwrap_or_else(|err| env.panic_with_error(err))
     }
 
     /// Maintain the dual fee-token bookkeeping (#239).
@@ -3691,7 +3702,7 @@ impl CraftNexusContract {
 
         // Calculate platform fee using effective fee bps for the seller
         let fee_bps = Self::get_effective_fee_bps(env.clone(), escrow.seller.clone());
-        let fee_amount = Self::calculate_fee(escrow.amount, fee_bps);
+        let fee_amount = Self::calculate_fee(&env, escrow.amount, fee_bps);
         let seller_amount = escrow.amount - fee_amount;
 
         // Update status
@@ -3790,7 +3801,7 @@ impl CraftNexusContract {
 
         // Calculate platform fee
         let fee_bps = Self::get_effective_fee_bps(env.clone(), escrow.seller.clone());
-        let fee_amount = Self::calculate_fee(escrow.amount, fee_bps);
+        let fee_amount = Self::calculate_fee(&env, escrow.amount, fee_bps);
         let seller_amount = escrow.amount - fee_amount;
 
         // Update status
@@ -4333,7 +4344,7 @@ impl CraftNexusContract {
     fn release_funds_to_seller(env: &Env, escrow: &Escrow) {
         let config = Self::get_platform_config_internal(env);
         let fee_bps = Self::get_effective_fee_bps(env.clone(), escrow.seller.clone());
-        let fee_amount = Self::calculate_fee(escrow.amount, fee_bps);
+        let fee_amount = Self::calculate_fee(env, escrow.amount, fee_bps);
         let seller_amount = escrow.amount - fee_amount;
 
         let token_client = token::Client::new(env, &escrow.token);
@@ -4849,7 +4860,7 @@ impl CraftNexusContract {
     /// * `amount` - The escrow amount
     pub fn calculate_fee_for_amount(env: Env, amount: i128) -> i128 {
         let config = Self::get_platform_config_internal(&env);
-        Self::calculate_fee(amount, config.platform_fee_bps)
+        Self::calculate_fee(&env, amount, config.platform_fee_bps)
     }
 
     /// Calculate net amount seller will receive
@@ -5251,7 +5262,7 @@ impl CraftNexusContract {
 
                     // Calculate platform fee
                     let fee_bps = Self::get_effective_fee_bps(env.clone(), escrow.seller.clone());
-                    let fee_amount = Self::calculate_fee(escrow.amount, fee_bps);
+                    let fee_amount = Self::calculate_fee(&env, escrow.amount, fee_bps);
                     let seller_amount = escrow.amount - fee_amount;
 
                     // Update status
@@ -5441,7 +5452,7 @@ impl CraftNexusContract {
 
         // Now perform token transfers (external calls)
         let token_client = token::Client::new(&env, &escrow.token);
-        let fee_amount = Self::calculate_fee(escrow.amount, config.platform_fee_bps);
+        let fee_amount = Self::calculate_fee(&env, escrow.amount, config.platform_fee_bps);
 
         // Apply the configured fee policy
         match config.expired_dispute_fee_policy {
@@ -6053,7 +6064,7 @@ impl CraftNexusContract {
         // Deduct platform fee from seller's portion using effective fee bps
         let config = Self::get_platform_config_internal(&env);
         let fee_bps = Self::get_effective_fee_bps(env.clone(), escrow.seller.clone());
-        let seller_fee = Self::calculate_fee(seller_gross, fee_bps);
+        let seller_fee = Self::calculate_fee(&env, seller_gross, fee_bps);
         let seller_net = seller_gross - seller_fee;
         let total_platform_fee = refund_fee.saturating_add(seller_fee);
 
@@ -6164,7 +6175,7 @@ impl CraftNexusContract {
     /// Calculate refund-side fee charged against a proposed gross partial refund.
     fn calculate_partial_refund_fee(env: &Env, gross_refund_amount: i128) -> i128 {
         let refund_fee_bps = Self::get_refund_fee_bps(env);
-        Self::calculate_fee(gross_refund_amount, refund_fee_bps)
+        Self::calculate_fee(env, gross_refund_amount, refund_fee_bps)
     }
 
     /// Validate gross partial refund amount against escrow solvency including any
@@ -6305,7 +6316,7 @@ impl CraftNexusContract {
         // Calculate and transfer platform fee
         let config = Self::get_platform_config_internal(&env);
         let fee_bps = Self::get_effective_fee_bps(env.clone(), escrow.artisan.clone());
-        let fee_amount = Self::calculate_fee(cycle_amount, fee_bps);
+        let fee_amount = Self::calculate_fee(&env, cycle_amount, fee_bps);
         let artisan_amount = cycle_amount - fee_amount;
 
         if fee_amount > 0 {

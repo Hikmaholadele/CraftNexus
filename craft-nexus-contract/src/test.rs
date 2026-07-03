@@ -642,6 +642,50 @@ fn test_calculate_seller_net_amount() {
     assert_eq!(net, 475);
 }
 
+fn assert_invalid_fee_error(
+    result: Result<
+        Result<i128, soroban_sdk::Error>,
+        Result<soroban_sdk::Error, soroban_sdk::InvokeError>,
+    >,
+) {
+    let expected = soroban_sdk::Error::from_contract_error(Error::InvalidFee as u32);
+    assert!(matches!(result, Err(Ok(err)) if err == expected));
+}
+
+#[test]
+fn test_calculate_fee_handles_high_safe_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, _) = setup_test(&env, true);
+
+    let amount = i128::MAX / 1_000;
+    let fee = client.calculate_fee_for_amount(&amount);
+
+    assert_eq!(fee, amount / 20);
+}
+
+#[test]
+fn test_calculate_fee_overflow_returns_contract_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, _) = setup_test(&env, true);
+
+    let result = client.try_calculate_fee_for_amount(&i128::MAX);
+
+    assert_invalid_fee_error(result);
+}
+
+#[test]
+fn test_calculate_seller_net_overflow_returns_contract_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, _) = setup_test(&env, true);
+
+    let result = client.try_calculate_seller_net_amount(&i128::MAX);
+
+    assert_invalid_fee_error(result);
+}
+
 #[test]
 fn test_update_platform_fee() {
     let env = Env::default();
