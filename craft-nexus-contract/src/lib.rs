@@ -305,10 +305,10 @@ pub enum DataKey {
     /// clients still see a meaningful value. Once a queue is fully
     /// drained the key is removed in `unstake_tokens`.
     ///
+    ///
     /// Admins may also call `purge_stake_cooldown_end` to remove a stale
     /// entry without touching the queue. See Issue #235 and
     /// `docs/deprecated-storage.md`.
-    StakeCooldownEnd(Address),
     /// Per-deposit stake queue for an artisan. Each entry represents an
     /// individual deposit and its cooldown end timestamp. This allows
     /// accurate tracking of staking timeframes when multiple deposits
@@ -5576,18 +5576,24 @@ impl CraftNexusContract {
             env.panic_with_error(Error::StakeQueueFull);
         }
 
-        // Initialize cooldown only if artisan doesn't already have one (#237)
-        // This prevents cooldown reset gaming where artisans extend their cooldown by continuously staking
-        let cooldown_key = DataKey::StakeCooldownEnd(artisan.clone());
-        let existing_cooldown: u64 = env.storage().persistent().get(&cooldown_key).unwrap_or(0);
+        // Check queue capacity and current cooldown state (#237)
+        let count_key = DataKey::ArtisanStakeQueueCount(artisan.clone());
+        let current_count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+
+        // Initialize cooldown only if artisan doesn't already have one.
+        // This prevents cooldown reset gaming where artisans extend their cooldown by continuously staking.
+        let existing_cooldown = if current_count > 0 {
+            let last_deposit_key = DataKey::ArtisanStakeQueueIndexed(artisan.clone(), current_count - 1);
+            let deposit: StakeDeposit = env.storage().persistent().get(&last_deposit_key).unwrap();
+            deposit.cooldown_end
+        } else {
+            0
+        };
 
         let cooldown_end = if existing_cooldown == 0 {
             // No existing cooldown, initialize new one
             let config = Self::get_platform_config_internal(&env);
-            let end = env.ledger().timestamp() + config.stake_cooldown as u64;
-            env.storage().persistent().set(&cooldown_key, &end);
-            Self::extend_persistent(&env, &cooldown_key);
-            end
+            env.ledger().timestamp() + config.stake_cooldown as u64
         } else {
             existing_cooldown
         };
@@ -5763,8 +5769,6 @@ impl CraftNexusContract {
             Self::extend_persistent(&env, &stake_key);
         } else {
             env.storage().persistent().remove(&stake_key);
-            let cooldown_key = DataKey::StakeCooldownEnd(artisan.clone());
-            env.storage().persistent().remove(&cooldown_key);
         }
 
         // Record unstake operation in history for audit trail (#237)
