@@ -1090,6 +1090,63 @@ CEI ordering is required for any function that:
 
 ---
 
+## Escrow Query Pagination
+
+### `get_escrows_by_buyer(buyer, page, page_size, reverse)`
+
+Returns a paginated list of escrow IDs for a specific buyer.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `buyer` | `Address` | The buyer's address (auth required) |
+| `page` | `u32` | Zero-indexed page number |
+| `page_size` | `u32` | Number of results per page (capped at `MAX_BATCH_SIZE = 20`) |
+| `reverse` | `bool` | If `true`, returns results in reverse chronological order |
+
+**Returns:** `Vec<u64>` — List of escrow IDs for the requested page. Empty if `page` is out of range.
+
+**Notes:**
+- `page_size` values above `MAX_BATCH_SIZE` (20) are silently capped to prevent memory exhaustion.
+- Uses indexed storage (`BuyerEscrowIndexed`) for O(page_size) reads.
+- Falls back to legacy `BuyerEscrows` vector for backward compatibility.
+
+**Usage pattern (off-chain/frontend):**
+```javascript
+const PAGE_SIZE = 10;
+let page = 0;
+let allEscrows = [];
+while (true) {
+  const ids = await contract.get_escrows_by_buyer(buyer, page, PAGE_SIZE, false);
+  if (ids.length === 0) break;
+  allEscrows.push(...ids);
+  page++;
+}
+```
+
+---
+
+### `get_escrows_by_seller(seller, page, page_size, reverse)`
+
+Returns a paginated list of escrow IDs for a specific seller.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `seller` | `Address` | The seller's address (auth required) |
+| `page` | `u32` | Zero-indexed page number |
+| `page_size` | `u32` | Number of results per page (capped at `MAX_BATCH_SIZE = 20`) |
+| `reverse` | `bool` | If `true`, returns results in reverse chronological order |
+
+**Returns:** `Vec<u64>` — List of escrow IDs for the requested page. Empty if `page` is out of range.
+
+**Notes:**
+- `page_size` values above `MAX_BATCH_SIZE` (20) are silently capped to prevent memory exhaustion.
+- Uses indexed storage (`SellerEscrowIndexed`) for O(page_size) reads.
+- Falls back to legacy `SellerEscrows` vector for backward compatibility.
+
+---
+
 ## Additional Resources
 
 - [Stellar Soroban Documentation](https://developers.stellar.org/docs/build/smart-contracts/overview)

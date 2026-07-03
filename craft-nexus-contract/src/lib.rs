@@ -240,6 +240,7 @@ const CURRENT_ESCROW_VERSION: u32 = 4;
 // Conservative batch size to avoid exceeding instruction/read-write limits
 // observed on Soroban testnets. Reduced from 100 to 20 (Issue #198).
 const MAX_BATCH_SIZE: u32 = 20;
+const MAX_PAGE_SIZE: u32 = 100;
 /// Timeout for unfunded escrows before they can be cancelled (24 hours) (#213)
 const UNFUNDED_CANCEL_TIMEOUT: u64 = 24 * 60 * 60;
 /// Hard ceiling for `NextRecurringEscrowId` (Issue #233).
@@ -296,6 +297,7 @@ pub enum DataKey {
     ArtisanFeeTier(Address),
     /// Staked token amount and asset for an artisan
     ArtisanStake(Address),
+    StakeCooldownEnd(Address),
     /// DEPRECATED single-cooldown timestamp for an artisan.
     ///
     /// Active stake/unstake logic uses [`DataKey::ArtisanStakeQueue`]; this
@@ -3070,23 +3072,28 @@ impl CraftNexusContract {
         env: Env,
         buyer: Address,
         page: u32,
-        limit: u32,
+        page_size: u32,
         reverse: bool,
     ) -> Result<soroban_sdk::Vec<u64>, Error> {
         buyer.require_auth();
         let mut result = soroban_sdk::Vec::new(&env);
 
+        let page_size = page_size.min(MAX_PAGE_SIZE);
+        if page_size == 0 {
+            return Ok(result);
+        }
+
         // Try new indexed storage first
         let count_key = DataKey::BuyerEscrowCount(buyer.clone());
         if env.storage().persistent().has(&count_key) {
             let total_count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0u32);
-            let start = page * limit;
+            let start = page * page_size;
 
             if start >= total_count {
                 return Ok(result);
             }
 
-            let end = (start + limit).min(total_count);
+            let end = (start + page_size).min(total_count);
 
             for position in start..end {
                 let storage_index = if reverse {
@@ -3117,14 +3124,14 @@ impl CraftNexusContract {
             Self::extend_persistent_read(&env, &legacy_key);
         }
 
-        let start = page * limit;
+        let start = page * page_size;
         let len = escrow_ids.len();
 
         if start >= len {
             return Ok(result);
         }
 
-        let end = (start + limit).min(len);
+        let end = (start + page_size).min(len);
         if reverse {
             for position in start..end {
                 if let Some(escrow_id) = escrow_ids.get(len - 1 - position) {
@@ -3143,23 +3150,28 @@ impl CraftNexusContract {
         env: Env,
         seller: Address,
         page: u32,
-        limit: u32,
+        page_size: u32,
         reverse: bool,
     ) -> Result<soroban_sdk::Vec<u64>, Error> {
         seller.require_auth();
         let mut result = soroban_sdk::Vec::new(&env);
 
+        let page_size = page_size.min(MAX_PAGE_SIZE);
+        if page_size == 0 {
+            return Ok(result);
+        }
+
         // Try new indexed storage first
         let count_key = DataKey::SellerEscrowCount(seller.clone());
         if env.storage().persistent().has(&count_key) {
             let total_count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0u32);
-            let start = page * limit;
+            let start = page * page_size;
 
             if start >= total_count {
                 return Ok(result);
             }
 
-            let end = (start + limit).min(total_count);
+            let end = (start + page_size).min(total_count);
 
             for position in start..end {
                 let storage_index = if reverse {
@@ -3190,14 +3202,14 @@ impl CraftNexusContract {
             Self::extend_persistent_read(&env, &legacy_key);
         }
 
-        let start = page * limit;
+        let start = page * page_size;
         let len = escrow_ids.len();
 
         if start >= len {
             return Ok(result);
         }
 
-        let end = (start + limit).min(len);
+        let end = (start + page_size).min(len);
         if reverse {
             for position in start..end {
                 if let Some(escrow_id) = escrow_ids.get(len - 1 - position) {

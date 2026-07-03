@@ -102,8 +102,6 @@ fn test_create_escrow_success() {
     assert!(!events.is_empty(), "No events emitted");
     let last_event = events.last().unwrap();
     assert_eq!(last_event.0, client.address);
-    let last_event = events.last();
-    assert_eq!(last_event.clone().unwrap().0, client.address);
     // Topics: ["escrow_created", escrow_id]
     assert_eq!(
         last_event.1,
@@ -723,8 +721,6 @@ fn test_update_platform_fee() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
-    let last_event = events.last();
-    let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(
         config_event.field_name,
         Symbol::new(&env, "platform_fee_bps")
@@ -1488,8 +1484,6 @@ fn test_set_min_escrow_amount_emits_config_event() {
     let events = env.events().all();
     let last_event = events.last().unwrap();
     let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
-    let last_event = events.last();
-    let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
 
     assert_eq!(
         config_event.field_name,
@@ -3926,4 +3920,50 @@ fn test_auto_cancel_unfunded_unauthorized() {
 
     // Buyer is not admin — must panic.
     client.auto_cancel_unfunded(&buyer, &soroban_sdk::vec![&env, 1u32]);
+}
+
+/// Issue #640 — get_escrows_by_buyer and get_escrows_by_seller must paginate
+/// results to avoid memory exhaustion. This test creates 200 escrows
+/// and verifies correct subsets are returned across multiple pages, and
+/// page_size limit is capped at MAX_PAGE_SIZE (100).
+#[test]
+fn test_get_escrows_pagination_large_dataset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let (client, buyer, seller, token_id, token_admin, _, _) = setup_test(&env, true);
+
+    // Mint enough tokens for 200 escrows
+    token_admin.mint(&buyer, &(200 * 1_000_000_000i128));
+
+    // Create 200 escrows individually (one per call since batch max is 20)
+    for i in 0..200u32 {
+        client.create_escrow(&buyer, &seller, &token_id, &1_000, &(i + 1), &Some(3600));
+    }
+
+    // Page 0: page_size=50 should return IDs 1..=50
+    let page0 = client.get_escrows_by_buyer(&buyer, &0, &50, &false);
+    assert_eq!(page0.len(), 50, "page0 should have 50 items");
+    assert_eq!(page0.get_unchecked(0), 1u64);
+    assert_eq!(page0.get_unchecked(49), 50u64);
+
+    // Page 1: page_size=50 should return IDs 51..=100
+    let page1 = client.get_escrows_by_buyer(&buyer, &1, &50, &false);
+    assert_eq!(page1.len(), 50, "page1 should have 50 items");
+    assert_eq!(page1.get_unchecked(0), 51u64);
+    assert_eq!(page1.get_unchecked(49), 100u64);
+
+    // Page 4: out of range
+    let page4 = client.get_escrows_by_buyer(&buyer, &4, &50, &false);
+    assert_eq!(page4.len(), 0, "page4 should be empty");
+
+    // page_size capped at MAX_PAGE_SIZE (100): requesting 200 returns only 100
+    let capped = client.get_escrows_by_buyer(&buyer, &0, &200, &false);
+    assert_eq!(capped.len(), 100, "page_size should be capped at MAX_PAGE_SIZE=100");
+
+    // Verify seller pagination returns same count
+    let seller_page0 = client.get_escrows_by_seller(&seller, &0, &50, &false);
+    assert_eq!(seller_page0.len(), 50, "seller page0 should have 50 items");
+    let seller_page1 = client.get_escrows_by_seller(&seller, &1, &50, &false);
+    assert_eq!(seller_page1.len(), 50, "seller page1 should have 50 items");
 }
