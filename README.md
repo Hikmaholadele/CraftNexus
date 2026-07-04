@@ -1,6 +1,8 @@
 # CraftNexus: Decentralized Artisanal Marketplace
 
 CraftNexus is a modern, decentralized web3 marketplace designed for artisans to showcase and sell handcrafted goods and educational courses globally. The platform utilizes Stellar's **Soroban** smart contracts to secure transactions, handle user onboarding, and manage trustless escrow payments.
+
+
 https://github.com/user-attachments/assets/58de2761-6137-4f2b-a8a0-6c9c57ebea46
 
 
