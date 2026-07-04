@@ -1159,6 +1159,53 @@ fn test_cancel_upgrade_wasm() {
     // Should panic when trying to update since proposal is gone
 }
 
+/// Issue #618 — cancel-and-repropose must not reset the review window.
+/// After a cancellation, propose_upgrade_wasm must return UpgradeCooldownActive
+/// if less than CANCEL_REPROPOSE_COOLDOWN seconds have elapsed.
+/// UpgradeCooldownActive = Error discriminant #33.
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #33)")]
+fn test_cancel_then_repropose_blocked_by_cooldown() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    let hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    // Propose and then cancel — this records LastUpgradeCancelledAt
+    client.propose_upgrade_wasm(&admin, &hash);
+    client.cancel_upgrade_wasm();
+
+    // Immediately re-proposing (same ledger timestamp) must panic with
+    // UpgradeCooldownActive (#33)
+    client.propose_upgrade_wasm(&admin, &hash);
+}
+
+/// Issue #618 — after the cancel cooldown window elapses, a new proposal must
+/// be accepted without error.
+#[test]
+fn test_repropose_succeeds_after_cancel_cooldown_elapses() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    let hash = BytesN::from_array(&env, &[2u8; 32]);
+
+    // Propose and cancel
+    client.propose_upgrade_wasm(&admin, &hash);
+    client.cancel_upgrade_wasm();
+
+    // Advance the ledger past CANCEL_REPROPOSE_COOLDOWN (7 days + 1 s)
+    env.ledger().with_mut(|li| {
+        li.timestamp += 7 * 24 * 60 * 60 + 1;
+    });
+
+    // Re-proposing after the cooldown must succeed
+    client.propose_upgrade_wasm(&admin, &hash);
+    let proposal = client.get_upgrade_proposal().expect("proposal should exist");
+    assert_eq!(proposal.wasm_hash, hash);
+}
+
 #[test]
 fn test_fee_rounding_floor_behavior_small_amounts() {
     let env = Env::default();
@@ -4015,4 +4062,50 @@ fn test_auto_cancel_unfunded_unauthorized() {
 
     // Buyer is not admin — must panic.
     client.auto_cancel_unfunded(&buyer, &soroban_sdk::vec![&env, 1u32]);
+}
+
+/// Issue #640 — get_escrows_by_buyer and get_escrows_by_seller must paginate
+/// results to avoid memory exhaustion. This test creates 200 escrows
+/// and verifies correct subsets are returned across multiple pages, and
+/// page_size limit is capped at MAX_PAGE_SIZE (100).
+#[test]
+fn test_get_escrows_pagination_large_dataset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let (client, buyer, seller, token_id, token_admin, _, _) = setup_test(&env, true);
+
+    // Mint enough tokens for 200 escrows
+    token_admin.mint(&buyer, &(200 * 1_000_000_000i128));
+
+    // Create 200 escrows individually (one per call since batch max is 20)
+    for i in 0..200u32 {
+        client.create_escrow(&buyer, &seller, &token_id, &1_000, &(i + 1), &Some(3600));
+    }
+
+    // Page 0: page_size=50 should return IDs 1..=50
+    let page0 = client.get_escrows_by_buyer(&buyer, &0, &50, &false);
+    assert_eq!(page0.len(), 50, "page0 should have 50 items");
+    assert_eq!(page0.get_unchecked(0), 1u64);
+    assert_eq!(page0.get_unchecked(49), 50u64);
+
+    // Page 1: page_size=50 should return IDs 51..=100
+    let page1 = client.get_escrows_by_buyer(&buyer, &1, &50, &false);
+    assert_eq!(page1.len(), 50, "page1 should have 50 items");
+    assert_eq!(page1.get_unchecked(0), 51u64);
+    assert_eq!(page1.get_unchecked(49), 100u64);
+
+    // Page 4: out of range
+    let page4 = client.get_escrows_by_buyer(&buyer, &4, &50, &false);
+    assert_eq!(page4.len(), 0, "page4 should be empty");
+
+    // page_size capped at MAX_PAGE_SIZE (100): requesting 200 returns only 100
+    let capped = client.get_escrows_by_buyer(&buyer, &0, &200, &false);
+    assert_eq!(capped.len(), 100, "page_size should be capped at MAX_PAGE_SIZE=100");
+
+    // Verify seller pagination returns same count
+    let seller_page0 = client.get_escrows_by_seller(&seller, &0, &50, &false);
+    assert_eq!(seller_page0.len(), 50, "seller page0 should have 50 items");
+    let seller_page1 = client.get_escrows_by_seller(&seller, &1, &50, &false);
+    assert_eq!(seller_page1.len(), 50, "seller page1 should have 50 items");
 }
