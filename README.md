@@ -5,6 +5,16 @@ CraftNexus is a modern, decentralized web3 marketplace designed for artisans to 
 
 https://github.com/user-attachments/assets/58de2761-6137-4f2b-a8a0-6c9c57ebea46
 
+<img width="1895" height="862" alt="image" src="https://github.com/user-attachments/assets/3044f403-9466-4ede-841b-87b23edc32c9" />
+
+<img width="1912" height="927" alt="image" src="https://github.com/user-attachments/assets/885bcf99-82d8-4d41-a3b4-0771b529d379" />
+
+<img width="1885" height="808" alt="image" src="https://github.com/user-attachments/assets/06f4aa8d-7784-4f47-8003-763199eaa4fe" />
+
+<img width="1884" height="802" alt="image" src="https://github.com/user-attachments/assets/1957d109-4536-4cfe-813e-83f1540751eb" />
+
+
+
 
 ---
 
