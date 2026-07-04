@@ -103,11 +103,11 @@ fn test_create_escrow_success() {
     let last_event = events.last().unwrap();
     assert_eq!(last_event.0, client.address);
     let last_event = events.last();
-    assert_eq!(last_event.unwrap().0, client.address);
+    assert_eq!(last_event.clone().unwrap().0, client.address);
     assert_eq!(last_event.clone().unwrap().0, client.address);
     // Topics: ["escrow_created", escrow_id]
     assert_eq!(
-        last_event.1,
+        last_event.clone().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -115,7 +115,7 @@ fn test_create_escrow_success() {
         ]
     );
     // Verify payload
-    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, order_id as u64);
     assert_eq!(event.action, EscrowAction::Created);
     assert_eq!(event.buyer, buyer);
@@ -723,7 +723,7 @@ fn test_update_platform_fee() {
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
-    let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let _config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
     let last_event = events.last();
     let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(
@@ -1488,7 +1488,7 @@ fn test_set_min_escrow_amount_emits_config_event() {
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
-    let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let _config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
     let last_event = events.last();
     let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
 
