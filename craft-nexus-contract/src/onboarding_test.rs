@@ -821,10 +821,11 @@ fn test_process_verification_request_unauthorized() {
             .set(&DataKey::UserProfile(user.clone()), &profile);
     });
 
-    // No platform-admin signature is present, so require_auth() must panic and
+       // No platform-admin signature is present, so require_auth() must panic and
     // the verification state transition must never execute.
     client.process_verification_request(&user, &true);
 }
+
 // ============================================================
 // Issue #41 – admin_clear_verification_request authorization
 // ============================================================
@@ -1258,11 +1259,14 @@ fn test_change_username_with_special_characters() {
     client.onboard_user(&user, &String::from_str(&env, "original"), &UserRole::Buyer);
 
     // Change to username with special characters (should be normalized)
-    let new_username = String::from_str(&env, "New-User_Name.123");
+       let new_username = String::from_str(&env, "New-User_Name.123");
     let updated = client.change_username(&user, &new_username);
 
     // Should be normalized with underscores
-    assert_eq!(updated.username, Symbol::new(&env, "new_user_name_123"));
+    assert_eq!(
+        updated.username,
+        Symbol::new(&env, "new_user_name_123")
+    );
 }
 
 #[test]

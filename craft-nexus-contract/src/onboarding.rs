@@ -85,7 +85,7 @@ extern crate alloc;
 use alloc::string::ToString;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
-    Symbol, TryFromVal, Val, Vec,
+    Symbol, IntoVal, TryFromVal, Val, Vec,
 };
 
 /// Standard TTL threshold for persistent storage (approx 14 hours at 5s ledger)

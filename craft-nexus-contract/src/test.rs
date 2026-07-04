@@ -1792,8 +1792,7 @@ fn test_multisig_threshold_two_of_two() {
 }
 
 #[test]
-fn test_duplicate_approval_ignored() {
-    // The same signer approving twice must not count as two approvals.
+fn test_duplicate_approval_returns_already_approved() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _, _, _, _, _, admin) = setup_test(&env, true);
@@ -1809,12 +1808,39 @@ fn test_duplicate_approval_ignored() {
     let hash = BytesN::from_array(&env, &[5u8; 32]);
 
     client.propose_upgrade_wasm(&admin, &hash);
-    // Duplicate call from the same signer — idempotent, no panic.
-    client.propose_upgrade_wasm(&admin, &hash);
+    let result = client.try_propose_upgrade_wasm(&admin, &hash);
+    assert!(result.is_err());
+    assert!(result.is_err());
 
-    // Still only 1 unique approval.
     assert_eq!(client.get_upgrade_approvals(&hash).len(), 1);
     assert!(client.get_upgrade_proposal().is_none());
+}
+
+#[test]
+fn test_unique_signers_only_reach_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(signer2.clone());
+    signers.push_back(signer3.clone());
+
+    client.set_upgrade_signers(&signers);
+    client.set_upgrade_threshold(&2);
+
+    let hash = BytesN::from_array(&env, &[7u8; 32]);
+
+    client.propose_upgrade_wasm(&admin, &hash);
+    assert!(client.get_upgrade_proposal().is_none());
+
+    client.propose_upgrade_wasm(&signer2, &hash);
+    let proposal = client.get_upgrade_proposal().expect("proposal missing");
+    assert_eq!(proposal.wasm_hash, hash);
+    assert_eq!(proposal.proposed_by, signer2);
 }
 
 #[test]
