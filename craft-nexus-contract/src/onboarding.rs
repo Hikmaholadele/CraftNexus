@@ -80,6 +80,13 @@
 // on first read (internal `try_get_user_profile`); integrators never observe an
 // out-of-date shape through the read API.
 
+use crate::alloc::string::ToString;
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
+    Symbol, IntoVal, TryFromVal, Val, Vec,
+};
+use crate::alloc::string::ToString;
+
 extern crate alloc;
 
 use alloc::string::ToString;
@@ -416,6 +423,8 @@ pub struct OnboardCallFailedEvent {
     pub reason: u32,
     /// Ledger timestamp when the failure occurred
     pub timestamp: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoVerifiedEvent {
@@ -1907,6 +1916,10 @@ impl OnboardingContract {
             .unwrap_or_else(|| Self::emit_onboard_failed_and_panic(&env, &user, Error::NotInitialized));
         Self::extend_persistent(&env, &DataKey::Config);
             .unwrap_or_else(|| env.panic_with_error(Error::NotInitialized));
+            .unwrap_or_else(|| {
+                Self::emit_onboard_failed_and_panic(&env, &user, Error::NotInitialized)
+            });
+        Self::extend_persistent(&env, &DataKey::Config);
 
         // [SECURITY] Endpoint #93: Only verified platform roles may approve new user
         // registrations. The platform admin must co-sign every onboarding transaction

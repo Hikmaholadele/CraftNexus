@@ -237,6 +237,8 @@ fn test_onboard_duplicate_username_case_insensitive() {
     client.onboard_user(&user1, &String::from_str(&env, "Alice"), &UserRole::Buyer);
     // "alice" should match "Alice" after normalization
     let result = client.try_onboard_user(&user2, &String::from_str(&env, "alice"), &UserRole::Artisan);
+    let result =
+        client.try_onboard_user(&user2, &String::from_str(&env, "alice"), &UserRole::Artisan);
     assert!(result.is_err());
 }
 
