@@ -102,9 +102,12 @@ fn test_create_escrow_success() {
     assert!(!events.is_empty(), "No events emitted");
     let last_event = events.last().unwrap();
     assert_eq!(last_event.0, client.address);
+    let last_event = events.last();
+    assert_eq!(last_event.clone().unwrap().0, client.address);
+    assert_eq!(last_event.clone().unwrap().0, client.address);
     // Topics: ["escrow_created", escrow_id]
     assert_eq!(
-        last_event.1,
+        last_event.clone().unwrap().1,
         vec![
             &env,
             Symbol::new(&env, "escrow").into_val(&env),
@@ -112,7 +115,7 @@ fn test_create_escrow_success() {
         ]
     );
     // Verify payload
-    let event: EscrowEvent = last_event.2.try_into_val(&env).unwrap();
+    let event: EscrowEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     assert_eq!(event.escrow_id, order_id as u64);
     assert_eq!(event.action, EscrowAction::Created);
     assert_eq!(event.buyer, buyer);
@@ -720,6 +723,9 @@ fn test_update_platform_fee() {
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
+    let _config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let last_event = events.last();
+    let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
     assert_eq!(
         config_event.field_name,
@@ -1059,6 +1065,66 @@ fn test_update_admin_requires_new_admin_cosign() {
     let new_admin = Address::generate(&env);
     // No auth is mocked — both current-admin and new_admin auth will fail.
     client.update_admin(&new_admin);
+}
+
+// ===== Admin recovery error tests (#415) =====
+
+fn assert_admin_recovery_failed(
+    result: Result<
+        Result<(), soroban_sdk::ConversionError>,
+        Result<Error, soroban_sdk::InvokeError>,
+    >,
+) {
+    assert!(matches!(result, Err(Ok(Error::AdminRecoveryFailed))));
+}
+
+#[test]
+fn test_recover_admin_missing_fallback_returns_standard_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, _) = setup_test(&env, true);
+
+    let recovered_admin = Address::generate(&env);
+    let result = client.try_recover_admin_access(&recovered_admin);
+
+    assert_admin_recovery_failed(result);
+}
+
+#[test]
+fn test_recover_admin_invalid_address_returns_standard_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    env.as_contract(&client.address, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::FallbackAdmin, &admin);
+    });
+
+    let result = client.try_recover_admin_access(&client.address);
+
+    assert_admin_recovery_failed(result);
+}
+
+#[test]
+fn test_recover_admin_timelock_returns_standard_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    env.as_contract(&client.address, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::FallbackAdmin, &admin);
+    });
+
+    let recovered_admin = Address::generate(&env);
+    let initial_result = client.try_recover_admin_access(&recovered_admin);
+    assert_admin_recovery_failed(initial_result);
+
+    let locked_result = client.try_recover_admin_access(&recovered_admin);
+    assert_admin_recovery_failed(locked_result);
 }
 
 #[test]
@@ -1530,6 +1596,9 @@ fn test_set_min_escrow_amount_emits_config_event() {
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
+    let _config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
+    let last_event = events.last();
+    let config_event: ConfigUpdatedEvent = last_event.unwrap().2.try_into_val(&env).unwrap();
     let config_event: ConfigUpdatedEvent = last_event.2.try_into_val(&env).unwrap();
 
     assert_eq!(
@@ -1770,8 +1839,7 @@ fn test_multisig_threshold_two_of_two() {
 }
 
 #[test]
-fn test_duplicate_approval_ignored() {
-    // The same signer approving twice must not count as two approvals.
+fn test_duplicate_approval_returns_already_approved() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _, _, _, _, _, admin) = setup_test(&env, true);
@@ -1787,12 +1855,39 @@ fn test_duplicate_approval_ignored() {
     let hash = BytesN::from_array(&env, &[5u8; 32]);
 
     client.propose_upgrade_wasm(&admin, &hash);
-    // Duplicate call from the same signer — idempotent, no panic.
-    client.propose_upgrade_wasm(&admin, &hash);
+    let result = client.try_propose_upgrade_wasm(&admin, &hash);
+    assert!(result.is_err());
+    assert!(result.is_err());
 
-    // Still only 1 unique approval.
     assert_eq!(client.get_upgrade_approvals(&hash).len(), 1);
     assert!(client.get_upgrade_proposal().is_none());
+}
+
+#[test]
+fn test_unique_signers_only_reach_threshold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _, _, _, _, admin) = setup_test(&env, true);
+
+    let signer2 = Address::generate(&env);
+    let signer3 = Address::generate(&env);
+    let mut signers = Vec::new(&env);
+    signers.push_back(admin.clone());
+    signers.push_back(signer2.clone());
+    signers.push_back(signer3.clone());
+
+    client.set_upgrade_signers(&signers);
+    client.set_upgrade_threshold(&2);
+
+    let hash = BytesN::from_array(&env, &[7u8; 32]);
+
+    client.propose_upgrade_wasm(&admin, &hash);
+    assert!(client.get_upgrade_proposal().is_none());
+
+    client.propose_upgrade_wasm(&signer2, &hash);
+    let proposal = client.get_upgrade_proposal().expect("proposal missing");
+    assert_eq!(proposal.wasm_hash, hash);
+    assert_eq!(proposal.proposed_by, signer2);
 }
 
 #[test]

@@ -136,6 +136,8 @@ pub enum Error {
     InvalidIpfsHash = 41,
     /// Caller is not an authorized upgrade signer
     NotAnUpgradeSigner = 42,
+    /// The same signer already approved this WASM upgrade hash
+    AlreadyApproved = 43,
 }
 
 /// Returns `true` if the error is transient and the operation may succeed on retry.
@@ -312,9 +314,6 @@ pub enum DataKey {
     /// drained the key is removed in `unstake_tokens`.
     ///
     ///
-    /// Admins may also call `purge_stake_cooldown_end` to remove a stale
-    /// entry without touching the queue. See Issue #235 and
-    /// `docs/deprecated-storage.md`.
     /// Per-deposit stake queue for an artisan. Each entry represents an
     /// individual deposit and its cooldown end timestamp. This allows
     /// accurate tracking of staking timeframes when multiple deposits
@@ -2526,16 +2525,21 @@ impl CraftNexusContract {
     /// Requires a 7-day time lock after recovery is initiated to prevent abuse
     pub fn recover_admin_access(env: Env, recovered_admin: Address) -> Result<(), Error> {
         // Check if fallback admin exists and is authorized
-        let fallback = env
+        let fallback = match env
             .storage()
             .persistent()
             .get::<_, Address>(&DataKey::FallbackAdmin)
-            .ok_or(Error::Unauthorized)?;
+        {
+            Some(fallback) => fallback,
+            None => return Err(Error::AdminRecoveryFailed),
+        };
 
         fallback.require_auth();
 
         // Validate the recovery address
-        Self::validate_admin_address(&env, &recovered_admin)?;
+        if Self::validate_admin_address(&env, &recovered_admin).is_err() {
+            return Err(Error::AdminRecoveryFailed);
+        }
 
         // Check if recovery time lock has passed (#431 — TTL-friendly read)
         let recovery_time = Self::get_persistent_u64(&env, &DataKey::AdminRecoveryTime);
@@ -2690,7 +2694,6 @@ impl CraftNexusContract {
         let window = release_window.unwrap_or(604800u32);
 
         // Validate release window bounds
-        let config = Self::get_platform_config_internal(&env);
         let min_window = config.min_release_window;
         let max_window = Self::get_max_release_window(&env);
 
@@ -4036,13 +4039,22 @@ impl CraftNexusContract {
             .get(&approvals_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        // Idempotent: ignore duplicate approvals from the same signer.
         if approvals.iter().any(|a| a == signer) {
-            return Ok(());
+            return Err(Error::AlreadyApproved);
         }
         approvals.push_back(signer.clone());
 
-        if (approvals.len() as u32) < threshold {
+        // Count only approvals from currently-authorised signers. This
+        // prevents removed or rotated signers from being counted towards the
+        // threshold if the signer list changes while approvals are pending.
+        let mut distinct_current_approvals: Vec<Address> = Vec::new(&env);
+        for a in approvals.iter() {
+            if signers.iter().any(|s| s == a) && !distinct_current_approvals.iter().any(|d| d == a) {
+                distinct_current_approvals.push_back(a.clone());
+            }
+        }
+
+        if (distinct_current_approvals.len() as u32) < threshold {
             // Threshold not yet met — persist partial approvals and return.
             env.storage().persistent().set(&approvals_key, &approvals);
             Self::extend_persistent(&env, &approvals_key);
@@ -5425,28 +5437,6 @@ impl CraftNexusContract {
         }
     }
 
-    /// Admin-only cleanup for the deprecated `StakeCooldownEnd` slot.
-    ///
-    /// Removes a stale single-timestamp cooldown entry for `artisan`
-    /// without touching `ArtisanStakeQueue`. Active staking logic relies
-    /// solely on the queue, so this is purely a storage hygiene tool for
-    /// operators who want to clear unused legacy keys. Returns `true` if
-    /// an entry was removed, `false` if there was nothing to clean up.
-    /// See Issue #235.
-    pub fn purge_stake_cooldown_end(env: Env, artisan: Address) -> bool {
-        let admin = Self::get_admin(&env)
-            .unwrap_or_else(|_| env.panic_with_error(crate::Error::Unauthorized));
-        admin.require_auth();
-
-        let key = DataKey::StakeCooldownEnd(artisan);
-        if env.storage().persistent().has(&key) {
-            env.storage().persistent().remove(&key);
-            true
-        } else {
-            false
-        }
-    }
-
     // ── Dispute Resolution Deadline (#93) ───────────────────────────
 
     /// Resolve a dispute that has exceeded the maximum dispute duration.
@@ -5625,7 +5615,8 @@ impl CraftNexusContract {
         // Initialize cooldown only if artisan doesn't already have one.
         // This prevents cooldown reset gaming where artisans extend their cooldown by continuously staking.
         let existing_cooldown = if current_count > 0 {
-            let last_deposit_key = DataKey::ArtisanStakeQueueIndexed(artisan.clone(), current_count - 1);
+            let last_deposit_key =
+                DataKey::ArtisanStakeQueueIndexed(artisan.clone(), current_count - 1);
             let deposit: StakeDeposit = env.storage().persistent().get(&last_deposit_key).unwrap();
             deposit.cooldown_end
         } else {
