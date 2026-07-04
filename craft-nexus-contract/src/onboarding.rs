@@ -80,13 +80,6 @@
 // on first read (internal `try_get_user_profile`); integrators never observe an
 // out-of-date shape through the read API.
 
-use crate::alloc::string::ToString;
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
-    Symbol, IntoVal, TryFromVal, Val, Vec,
-};
-use crate::alloc::string::ToString;
-
 extern crate alloc;
 
 use alloc::string::ToString;
@@ -94,8 +87,6 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, Bytes, Env, Map, String,
     Symbol, TryFromVal, Val, Vec,
 };
-use crate::alloc::string::ToString;
-extern crate alloc;
 
 /// Standard TTL threshold for persistent storage (approx 14 hours at 5s ledger)
 const TTL_THRESHOLD: u32 = 10_000;
@@ -1913,9 +1904,6 @@ impl OnboardingContract {
             .storage()
             .persistent()
             .get(&DataKey::Config)
-            .unwrap_or_else(|| Self::emit_onboard_failed_and_panic(&env, &user, Error::NotInitialized));
-        Self::extend_persistent(&env, &DataKey::Config);
-            .unwrap_or_else(|| env.panic_with_error(Error::NotInitialized));
             .unwrap_or_else(|| {
                 Self::emit_onboard_failed_and_panic(&env, &user, Error::NotInitialized)
             });
