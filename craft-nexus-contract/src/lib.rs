@@ -4011,7 +4011,17 @@ impl CraftNexusContract {
         }
         approvals.push_back(signer.clone());
 
-        if (approvals.len() as u32) < threshold {
+        // Count only approvals from currently-authorised signers. This
+        // prevents removed or rotated signers from being counted towards the
+        // threshold if the signer list changes while approvals are pending.
+        let mut distinct_current_approvals: Vec<Address> = Vec::new(&env);
+        for a in approvals.iter() {
+            if signers.iter().any(|s| s == a) && !distinct_current_approvals.iter().any(|d| d == a) {
+                distinct_current_approvals.push_back(a.clone());
+            }
+        }
+
+        if (distinct_current_approvals.len() as u32) < threshold {
             // Threshold not yet met — persist partial approvals and return.
             env.storage().persistent().set(&approvals_key, &approvals);
             Self::extend_persistent(&env, &approvals_key);
